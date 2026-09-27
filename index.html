@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vibe Weather</title>
+<style>
+:root{--teal:#00BFA5;--coral:#FF7043;--sun:#FFC107;--cream:#FFF8E1;--ink:#263238}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(160deg,#00BFA5 0%,#4DD0E1 45%,#FF7043 100%);min-height:100vh;color:var(--ink);display:flex;justify-content:center;padding:32px 16px}
+main{width:100%;max-width:520px}
+h1{color:#fff;font-size:2.4rem;margin:0 0 4px;text-shadow:0 2px 8px rgba(0,0,0,.2)}
+.tag{color:#fff;opacity:.9;margin:0 0 20px}
+.card{background:var(--cream);border-radius:18px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.15);margin-bottom:16px}
+form{display:flex;gap:8px}
+input{flex:1;padding:12px 14px;border:2px solid #e0d6b8;border-radius:12px;font-size:1rem}
+button{background:var(--coral);color:#fff;border:0;border-radius:12px;padding:12px 18px;font-weight:700;font-size:1rem;cursor:pointer}
+.temp{font-size:3.2rem;font-weight:800;margin:6px 0}
+.row{display:flex;justify-content:space-between;color:#546E7A}
+ul{list-style:none;padding:0;margin:0}
+li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee3c4}
+li:last-child{border:0}
+.muted{color:#78909C;font-size:.9rem}
+.badge{display:inline-block;background:var(--sun);border-radius:999px;padding:2px 10px;font-size:.75rem;font-weight:700;margin-left:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<main>
+<h1>Vibe Weather <span class="badge" id="ver">v1</span></h1>
+<p class="tag">Built by describing it to Claude Code. Deployed by Netlify. Remembered by Supabase.</p>
+<div class="card">
+<form id="f"><input id="q" placeholder="Try Miami, Tokyo, or Lagos" required><button>Check</button></form>
+</div>
+<div class="card" id="out" hidden></div>
+<div class="card"><strong>Recent searches</strong> <span class="muted">(stored in Supabase)</span><ul id="recent"><li class="muted">Loading...</li></ul></div>
+</main>
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+const supabase = createClient("https://fszsocwuuuxbblfedjkr.supabase.co", "sb_publishable_LRhUzoDwTmiAze3WfOGX5g_qxi-dgC1");
+const codes = {0:"Clear sky",1:"Mainly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Fog",51:"Light drizzle",53:"Drizzle",55:"Heavy drizzle",61:"Light rain",63:"Rain",65:"Heavy rain",71:"Light snow",73:"Snow",75:"Heavy snow",80:"Rain showers",81:"Rain showers",82:"Violent showers",95:"Thunderstorm",96:"Thunderstorm, hail",99:"Thunderstorm, hail"};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function loadRecent() {
+  const { data, error } = await supabase.from("weather_searches").select("city,country,temperature_f,conditions,created_at").order("created_at", { ascending: false }).limit(5);
+  if (error) { $("recent").innerHTML = `<li class="muted">Could not load: ${esc(error.message)}</li>`; return; }
+  $("recent").innerHTML = data.length ? data.map((r) => `<li><span>${esc(r.city)}, ${esc(r.country)}</span><span>${Math.round(r.temperature_f)}°F · ${esc(r.conditions)}</span></li>`).join("") : `<li class="muted">No searches yet. Be the first.</li>`;
+}
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const out = $("out"); out.hidden = false; out.innerHTML = "Looking up...";
+  try {
+    const geo = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&name=${encodeURIComponent($("q").value)}`)).json();
+    if (!geo.results?.length) { out.innerHTML = "City not found. Try another name."; return; }
+    const p = geo.results[0];
+    const wx = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph`)).json();
+    const c = wx.current, cond = codes[c.weather_code] || "Unknown";
+    out.innerHTML = `<div class="muted">${esc(p.name)}, ${esc(p.country)}</div><div class="temp">${Math.round(c.temperature_2m)}°F</div><div>${cond}</div><div class="row"><span>Humidity ${c.relative_humidity_2m}%</span><span>Wind ${Math.round(c.wind_speed_10m)} mph</span></div>`;
+    await supabase.from("weather_searches").insert({ city: p.name, country: p.country, temperature_f: c.temperature_2m, conditions: cond });
+    loadRecent();
+  } catch (err) { out.innerHTML = "Something went wrong: " + esc(err.message); }
+});
+loadRecent();
+</script>
+</body>
+</html>
